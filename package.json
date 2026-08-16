@@ -1,0 +1,7 @@
+{
+  "name": "data-room",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ]
+}
