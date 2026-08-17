@@ -1,0 +1,115 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id             String     @id @default(uuid())
+  name           String
+  email          String     @unique
+  password       String
+  refreshToken   String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  dataRooms      DataRoom[]
+  createdShares  Share[]    @relation("CreatedShares")
+  receivedShares Share[]    @relation("ReceivedShares")
+}
+
+model DataRoom {
+  id   String @id @default(uuid())
+  name String
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  folders Folder[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Folder {
+  id   String @id @default(uuid())
+  name String
+
+  dataRoomId String
+  dataRoom   DataRoom @relation(fields: [dataRoomId], references: [id], onDelete: Cascade)
+
+  parentId String?
+  parent   Folder?  @relation("FolderChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children Folder[] @relation("FolderChildren")
+
+  files File[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([dataRoomId, parentId, name])
+  @@index([dataRoomId])
+  @@index([parentId])
+}
+
+model File {
+  id String @id @default(uuid())
+
+  name         String
+  originalName String
+
+  url      String
+  mimeType String
+  size     Int
+
+  folderId String
+  folder   Folder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([folderId, name])
+  @@index([folderId])
+}
+
+model Share {
+  id String @id @default(uuid())
+
+  token String @unique
+
+  type ShareType
+
+  resourceType ShareResourceType
+  resourceId   String
+
+  userId String?
+  user   User?   @relation("ReceivedShares", fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime?
+
+  createdById String
+  createdBy   User   @relation("CreatedShares", fields: [createdById], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([resourceId, resourceType])
+  @@index([userId])
+  @@index([createdById])
+}
+
+enum ShareType {
+  PUBLIC
+  USER
+}
+
+enum ShareResourceType {
+  DATAROOM
+  FOLDER
+  FILE
+}

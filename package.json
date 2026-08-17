@@ -3,5 +3,8 @@
   "private": true,
   "workspaces": [
     "apps/*"
-  ]
+  ],
+  "devDependencies": {
+    "@types/node": "^26.2.0"
+  }
 }
