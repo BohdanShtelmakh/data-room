@@ -3,7 +3,7 @@ services:
     name: data-room-api
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build --workspace api
+    buildCommand: npm ci --include=dev && npm run build --workspace api
     startCommand: npm run start:render --workspace api
     autoDeploy: true
     envVars:
