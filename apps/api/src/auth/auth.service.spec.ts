@@ -2,7 +2,7 @@ import { HttpException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
-import {  User } from '@prisma/client';
+import { User } from '@prisma/client';
 import { compare, hash } from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { AuthResponseDto } from './dto/auth-response.dto';

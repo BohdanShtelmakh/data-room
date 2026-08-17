@@ -1,18 +1,15 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { DataRoomService } from './data-room.service';
 
 describe('DataRoomService', () => {
-  let service: DataRoomService;
+  it('filters data rooms by owner', async () => {
+    const prisma = { dataRoom: { findMany: jest.fn().mockResolvedValue([]) } };
+    const service = new DataRoomService(prisma as never);
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [DataRoomService],
-    }).compile();
+    await service.findByUser('user-1');
 
-    service = module.get<DataRoomService>(DataRoomService);
-  });
-
-  it('should be defined', () => {
-    expect(service).toBeDefined();
+    expect(prisma.dataRoom.findMany).toHaveBeenCalledWith({
+      where: { ownerId: 'user-1' },
+      include: { folders: true },
+    });
   });
 });

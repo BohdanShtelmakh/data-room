@@ -9,9 +9,9 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import type { User } from '@prisma/client';
-import { createReadStream } from 'fs';
 import { Auth } from 'src/decorators/user.decorator';
 import { Public } from 'src/decorators/public.decorator';
+import { contentDisposition } from 'src/file/file-content';
 import { CreateShareDto } from './dto/create-share.dto';
 import { ShareService } from './share.service';
 
@@ -62,12 +62,12 @@ export class ShareController {
     @Param('token') token: string,
     @Param('fileId') fileId: string,
   ) {
-    const { file, size } = await this.shareService.getPublicFile(
+    const { file, size, stream } = await this.shareService.getPublicFile(
       token,
       fileId,
       false,
     );
-    return new StreamableFile(createReadStream(file.url), {
+    return new StreamableFile(stream, {
       type: 'application/octet-stream',
       disposition: contentDisposition('attachment', file.name),
       length: size,
@@ -82,22 +82,12 @@ export class ShareController {
     @Param('token') token: string,
     @Param('fileId') fileId: string,
   ) {
-    const { file, size } = await this.shareService.getPublicFile(
-      token,
-      fileId,
-      true,
-    );
-    return new StreamableFile(createReadStream(file.url), {
-      type: file.mimeType,
+    const { file, contentType, size, stream } =
+      await this.shareService.getPublicFile(token, fileId, true);
+    return new StreamableFile(stream, {
+      type: contentType!,
       disposition: contentDisposition('inline', file.name),
       length: size,
     });
   }
-}
-
-function contentDisposition(type: 'attachment' | 'inline', filename: string) {
-  const fallback = filename
-    .replace(/[^\x20-\x7E]/g, '_')
-    .replace(/["\\]/g, '_');
-  return `${type}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }

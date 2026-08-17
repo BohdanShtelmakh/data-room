@@ -21,7 +21,7 @@ async function bootstrap() {
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalGuards(new JwtAuthGuard(app.get(Reflector)));
-  const port = process.env.APP_PORT ?? 3000;
+  const port = process.env.PORT ?? process.env.APP_PORT ?? 3000;
   const host = process.env.HOST ?? '0.0.0.0';
   await app.listen(port, host);
   Logger.log(`Application is running on: ${port}`, 'App');

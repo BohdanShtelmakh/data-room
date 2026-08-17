@@ -39,6 +39,12 @@ export class HttpExceptionFilter<T> implements ExceptionFilter {
         message: 'An unexpected error occurred',
       });
     }
-    Logger.error('Exception caught by filter:', exception);
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      Logger.error(
+        'Unexpected request failure',
+        exception instanceof Error ? exception.stack : undefined,
+        HttpExceptionFilter.name,
+      );
+    }
   }
 }

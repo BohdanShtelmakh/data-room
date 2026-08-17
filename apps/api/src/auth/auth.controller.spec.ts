@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {  User } from '@prisma/client';
+import { User } from '@prisma/client';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthResponseDto } from './dto/auth-response.dto';

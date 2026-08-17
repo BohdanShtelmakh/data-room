@@ -2,22 +2,23 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  InternalServerErrorException,
   NotFoundException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
-import { Prisma, type User } from '@prisma/client';
-import { stat, unlink } from 'fs/promises';
+import { Prisma, ShareResourceType, type User } from '@prisma/client';
 import { UpdateFileDto } from 'src/file/dto/update-file.dto';
 import { UploadFilesDto } from 'src/file/dto/upload-files.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ShareService } from 'src/share/share.service';
+import { StorageService } from 'src/storage/storage.service';
+import { fileMetadata, previewContentType } from './file-content';
 
 @Injectable()
 export class FileService {
   constructor(
     private prisma: PrismaService,
     private shareService: ShareService,
+    private storage: StorageService,
   ) {}
 
   async findOne(id: string, user: User) {
@@ -40,18 +41,13 @@ export class FileService {
 
   async getContent(id: string, user: User, preview: boolean) {
     const file = await this.findReadable(id, user);
-    if (preview && !this.isPreviewable(file.mimeType)) {
+    const contentType = preview ? previewContentType(file.mimeType) : null;
+    if (preview && !contentType) {
       throw new UnsupportedMediaTypeException(
         'This file type cannot be previewed safely',
       );
     }
-    try {
-      const fileStats = await stat(file.url);
-      if (!fileStats.isFile()) throw new Error('Not a file');
-      return { file, size: fileStats.size };
-    } catch {
-      throw new NotFoundException('File content not found');
-    }
+    return { file, contentType, ...(await this.storage.get(file.url)) };
   }
 
   async findReadable(id: string, user: User) {
@@ -67,8 +63,9 @@ export class FileService {
     files: Array<Express.Multer.File> = [],
     user: User,
   ) {
+    const storedKeys: string[] = [];
     const cleanup = () =>
-      Promise.allSettled(files.map((file) => unlink(file.path)));
+      Promise.allSettled(storedKeys.map((key) => this.storage.delete(key)));
 
     try {
       if (files.length === 0) {
@@ -96,11 +93,18 @@ export class FileService {
         throw new ConflictException('File with this name already exists');
       }
 
+      const storedFiles: Array<{ file: Express.Multer.File; key: string }> = [];
+      for (const file of files) {
+        const stored = await this.storage.put(file);
+        storedKeys.push(stored.key);
+        storedFiles.push({ file, key: stored.key });
+      }
+
       return await this.prisma.file.createMany({
-        data: files.map((file) => ({
+        data: storedFiles.map(({ file, key }) => ({
           name: file.originalname,
           originalName: file.originalname,
-          url: file.path,
+          url: key,
           mimeType: file.mimetype,
           size: file.size,
           folderId: folder.id,
@@ -153,7 +157,7 @@ export class FileService {
     }
 
     try {
-      return await this.prisma.file.update({
+      const updated = await this.prisma.file.update({
         where: {
           id,
         },
@@ -162,6 +166,7 @@ export class FileService {
           folderId: targetFolderId,
         },
       });
+      return fileMetadata(updated);
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -176,35 +181,17 @@ export class FileService {
   async remove(id: string, user: User) {
     const file = await this.findOne(id, user);
 
-    const deleted = await this.prisma.file.delete({
-      where: {
-        id,
-      },
+    const deleted = await this.prisma.$transaction(async (tx) => {
+      await tx.share.deleteMany({
+        where: {
+          resourceType: ShareResourceType.FILE,
+          resourceId: id,
+        },
+      });
+      return tx.file.delete({ where: { id } });
     });
 
-    try {
-      await unlink(file.url);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw new InternalServerErrorException(
-          'File deleted, but storage cleanup failed',
-        );
-      }
-    }
-    return deleted;
-  }
-
-  private isPreviewable(mimeType: string) {
-    return (
-      mimeType.startsWith('image/') ||
-      mimeType.startsWith('audio/') ||
-      mimeType.startsWith('video/') ||
-      mimeType.startsWith('text/') ||
-      mimeType === 'application/pdf' ||
-      mimeType === 'application/json' ||
-      mimeType === 'application/xml' ||
-      mimeType.endsWith('+json') ||
-      mimeType.endsWith('+xml')
-    );
+    await this.storage.delete(file.url);
+    return fileMetadata(deleted);
   }
 }

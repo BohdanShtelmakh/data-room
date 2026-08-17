@@ -1,20 +1,16 @@
-import { Test, TestingModule } from '@nestjs/testing';
+import type { User } from '@prisma/client';
 import { DataRoomController } from './data-room.controller';
 import { DataRoomService } from './data-room.service';
 
 describe('DataRoomController', () => {
-  let controller: DataRoomController;
+  it('loads only the authenticated user data rooms', async () => {
+    const service = { findByUser: jest.fn() };
+    const controller = new DataRoomController(
+      service as unknown as DataRoomService,
+    );
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [DataRoomController],
-      providers: [DataRoomService],
-    }).compile();
+    await controller.findMyDataRooms({ id: 'user-1' } as User);
 
-    controller = module.get<DataRoomController>(DataRoomController);
-  });
-
-  it('should be defined', () => {
-    expect(controller).toBeDefined();
+    expect(service.findByUser).toHaveBeenCalledWith('user-1');
   });
 });

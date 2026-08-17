@@ -32,6 +32,11 @@ export class FolderController {
     return this.folderService.findContent(id, user.id);
   }
 
+  @Get(':id/deletion-impact')
+  deletionImpact(@Param('id') id: string, @Auth() user: User) {
+    return this.folderService.deletionImpact(id, user.id);
+  }
+
   @Patch(':id')
   update(
     @Param('id') id: string,

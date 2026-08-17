@@ -4,11 +4,11 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { unlink } from 'fs/promises';
+import { Prisma, ShareResourceType } from '@prisma/client';
 import { DataRoomService } from 'src/data-room/data-room.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ShareService } from 'src/share/share.service';
+import { StorageService } from 'src/storage/storage.service';
 import { CreateFolderDto } from './dto/create-folder.dto';
 import { UpdateFolderDto } from './dto/update-folder.dto';
 
@@ -18,6 +18,7 @@ export class FolderService {
     private prisma: PrismaService,
     private dataRoomService: DataRoomService,
     private shareService: ShareService,
+    private storage: StorageService,
   ) {}
   async create(createFolderDto: CreateFolderDto, userId: string) {
     const [dataRoom] = await this.dataRoomService.findByUser(userId);
@@ -41,7 +42,6 @@ export class FolderService {
       createFolderDto.parentId ?? null,
       createFolderDto.name,
     );
-    // TODO logic of creating a folder in some storage
     try {
       return await this.prisma.folder.create({
         data: { ...createFolderDto, dataRoomId: dataRoom.id },
@@ -141,6 +141,56 @@ export class FolderService {
   }
 
   async remove(id: string, userId: string) {
+    const folderIds = await this.ownedSubtreeIds(id, userId);
+    const { deleted, files } = await this.prisma.$transaction(async (tx) => {
+      const files = await tx.file.findMany({
+        where: { folderId: { in: [...folderIds] } },
+        select: { id: true, url: true },
+      });
+      await tx.share.deleteMany({
+        where: {
+          OR: [
+            {
+              resourceType: ShareResourceType.FOLDER,
+              resourceId: { in: [...folderIds] },
+            },
+            {
+              resourceType: ShareResourceType.FILE,
+              resourceId: { in: files.map((file) => file.id) },
+            },
+          ],
+        },
+      });
+      const deleted = await tx.folder.delete({ where: { id } });
+      return { deleted, files };
+    });
+    const cleanup = await Promise.allSettled(
+      files.map((file) => this.storage.delete(file.url)),
+    );
+    const failed = cleanup.some((result) => result.status === 'rejected');
+    if (failed) {
+      throw new InternalServerErrorException(
+        'Folder deleted, but storage cleanup failed',
+      );
+    }
+    return deleted;
+  }
+
+  async deletionImpact(id: string, userId: string) {
+    const folderIds = await this.ownedSubtreeIds(id, userId);
+    const files = await this.prisma.file.aggregate({
+      where: { folderId: { in: [...folderIds] } },
+      _count: { id: true },
+      _sum: { size: true },
+    });
+    return {
+      folderCount: folderIds.size,
+      fileCount: files._count.id,
+      totalSize: files._sum.size ?? 0,
+    };
+  }
+
+  private async ownedSubtreeIds(id: string, userId: string) {
     const folders = await this.prisma.folder.findMany({
       where: { dataRoom: { ownerId: userId } },
       select: { id: true, parentId: true },
@@ -150,42 +200,16 @@ export class FolderService {
     }
 
     const folderIds = new Set([id]);
-    let changed = true;
-    while (changed) {
-      changed = false;
+    let previousSize = 0;
+    while (folderIds.size !== previousSize) {
+      previousSize = folderIds.size;
       for (const folder of folders) {
-        if (
-          folder.parentId &&
-          folderIds.has(folder.parentId) &&
-          !folderIds.has(folder.id)
-        ) {
+        if (folder.parentId && folderIds.has(folder.parentId)) {
           folderIds.add(folder.id);
-          changed = true;
         }
       }
     }
-    const { deleted, files } = await this.prisma.$transaction(async (tx) => {
-      const files = await tx.file.findMany({
-        where: { folderId: { in: [...folderIds] } },
-        select: { url: true },
-      });
-      const deleted = await tx.folder.delete({ where: { id } });
-      return { deleted, files };
-    });
-    const cleanup = await Promise.allSettled(
-      files.map((file) => unlink(file.url)),
-    );
-    const failed = cleanup.some(
-      (result) =>
-        result.status === 'rejected' &&
-        (result.reason as NodeJS.ErrnoException)?.code !== 'ENOENT',
-    );
-    if (failed) {
-      throw new InternalServerErrorException(
-        'Folder deleted, but file cleanup failed',
-      );
-    }
-    return deleted;
+    return folderIds;
   }
 
   private async ensureUniqueName(

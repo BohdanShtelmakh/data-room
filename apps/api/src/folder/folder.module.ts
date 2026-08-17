@@ -4,9 +4,10 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { FolderController } from './folder.controller';
 import { FolderService } from './folder.service';
 import { ShareModule } from 'src/share/share.module';
+import { StorageModule } from 'src/storage/storage.module';
 
 @Module({
-  imports: [DataRoomModule, ShareModule],
+  imports: [DataRoomModule, ShareModule, StorageModule],
   controllers: [FolderController],
   providers: [FolderService, PrismaService],
 })

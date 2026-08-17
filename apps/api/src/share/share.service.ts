@@ -7,13 +7,17 @@ import {
 } from '@nestjs/common';
 import { Share, ShareResourceType, ShareType } from '@prisma/client';
 import { randomBytes } from 'crypto';
-import { stat } from 'fs/promises';
+import { fileMetadata, previewContentType } from 'src/file/file-content';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { StorageService } from 'src/storage/storage.service';
 import { CreateShareDto } from './dto/create-share.dto';
 
 @Injectable()
 export class ShareService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private storage: StorageService,
+  ) {}
 
   async create(dto: CreateShareDto, ownerId: string) {
     await this.assertOwner(dto.resourceType, dto.resourceId, ownerId);
@@ -136,10 +140,12 @@ export class ShareService {
     if (share.resourceType === ShareResourceType.DATAROOM) {
       const room = await this.prisma.dataRoom.findUnique({
         where: { id: share.resourceId },
+        select: { id: true, name: true, createdAt: true, updatedAt: true },
       });
       if (!room) throw new NotFoundException('Shared resource not found');
       const folders = await this.prisma.folder.findMany({
         where: { dataRoomId: room.id, parentId: null },
+        select: { id: true, name: true, parentId: true },
       });
       return {
         share: this.publicShareInfo(share),
@@ -158,7 +164,7 @@ export class ShareService {
     const file = await this.publicFile(share, share.resourceId, false);
     return {
       share: this.publicShareInfo(share),
-      resource: { ...this.fileMetadata(file), kind: 'FILE' },
+      resource: { ...fileMetadata(file), kind: 'FILE' },
     };
   }
 
@@ -170,13 +176,8 @@ export class ShareService {
   async getPublicFile(token: string, fileId: string, preview: boolean) {
     const share = await this.getPublicShare(token);
     const file = await this.publicFile(share, fileId, preview);
-    try {
-      const stats = await stat(file.url);
-      if (!stats.isFile()) throw new Error();
-      return { file, size: stats.size };
-    } catch {
-      throw new NotFoundException('File content not found');
-    }
+    const contentType = preview ? previewContentType(file.mimeType) : null;
+    return { file, contentType, ...(await this.storage.get(file.url)) };
   }
 
   private async publicFolderContent(share: Share, folderId: string) {
@@ -184,7 +185,10 @@ export class ShareService {
       throw new NotFoundException('Shared folder not found');
     const folder = await this.prisma.folder.findUnique({
       where: { id: folderId },
-      include: { children: true, files: { omit: { url: true } } },
+      include: {
+        children: { select: { id: true, name: true, parentId: true } },
+        files: { omit: { url: true } },
+      },
     });
     if (!folder) throw new NotFoundException('Shared folder not found');
     return {
@@ -198,7 +202,7 @@ export class ShareService {
     const file = await this.prisma.file.findUnique({ where: { id: fileId } });
     if (!file || !(await this.shareContainsFile(share, file)))
       throw new NotFoundException('Shared file not found');
-    if (preview && !this.isPreviewable(file.mimeType))
+    if (preview && !previewContentType(file.mimeType))
       throw new UnsupportedMediaTypeException(
         'This file type cannot be previewed safely',
       );
@@ -285,24 +289,6 @@ export class ShareService {
     };
   }
 
-  private fileMetadata(file: {
-    id: string;
-    name: string;
-    originalName: string;
-    mimeType: string;
-    size: number;
-    folderId: string;
-  }) {
-    return {
-      id: file.id,
-      name: file.name,
-      originalName: file.originalName,
-      mimeType: file.mimeType,
-      size: file.size,
-      folderId: file.folderId,
-    };
-  }
-
   private async getResourceSummary(type: ShareResourceType, id: string) {
     if (type === ShareResourceType.DATAROOM)
       return this.prisma.dataRoom.findUnique({
@@ -322,19 +308,5 @@ export class ShareService {
       where: { id },
       select: { id: true, name: true, mimeType: true, size: true },
     });
-  }
-
-  private isPreviewable(mimeType: string) {
-    return (
-      mimeType.startsWith('image/') ||
-      mimeType.startsWith('audio/') ||
-      mimeType.startsWith('video/') ||
-      mimeType.startsWith('text/') ||
-      mimeType === 'application/pdf' ||
-      mimeType === 'application/json' ||
-      mimeType === 'application/xml' ||
-      mimeType.endsWith('+json') ||
-      mimeType.endsWith('+xml')
-    );
   }
 }

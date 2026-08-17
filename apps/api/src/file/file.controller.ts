@@ -13,10 +13,11 @@ import {
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import type { User } from '@prisma/client';
-import { createReadStream } from 'fs';
+import { memoryStorage } from 'multer';
 import { Auth } from 'src/decorators/user.decorator';
 import { UpdateFileDto } from 'src/file/dto/update-file.dto';
 import { UploadFilesDto } from 'src/file/dto/upload-files.dto';
+import { contentDisposition, fileMetadata } from './file-content';
 import { FileService } from './file.service';
 
 @Controller('file')
@@ -26,16 +27,7 @@ export class FileController {
   @Get(':id')
   async findOne(@Param('id') id: string, @Auth() user: User) {
     const file = await this.fileService.findReadable(id, user);
-    return {
-      id: file.id,
-      name: file.name,
-      originalName: file.originalName,
-      mimeType: file.mimeType,
-      size: file.size,
-      folderId: file.folderId,
-      createdAt: file.createdAt,
-      updatedAt: file.updatedAt,
-    };
+    return fileMetadata(file);
   }
 
   @Get(':id/download')
@@ -45,8 +37,12 @@ export class FileController {
     @Param('id') id: string,
     @Auth() user: User,
   ): Promise<StreamableFile> {
-    const { file, size } = await this.fileService.getContent(id, user, false);
-    return new StreamableFile(createReadStream(file.url), {
+    const { file, size, stream } = await this.fileService.getContent(
+      id,
+      user,
+      false,
+    );
+    return new StreamableFile(stream, {
       type: 'application/octet-stream',
       disposition: contentDisposition('attachment', file.name),
       length: size,
@@ -60,9 +56,10 @@ export class FileController {
     @Param('id') id: string,
     @Auth() user: User,
   ): Promise<StreamableFile> {
-    const { file, size } = await this.fileService.getContent(id, user, true);
-    return new StreamableFile(createReadStream(file.url), {
-      type: file.mimeType,
+    const { file, contentType, size, stream } =
+      await this.fileService.getContent(id, user, true);
+    return new StreamableFile(stream, {
+      type: contentType!,
       disposition: contentDisposition('inline', file.name),
       length: size,
     });
@@ -70,9 +67,9 @@ export class FileController {
 
   @Post('upload')
   @UseInterceptors(
-    FilesInterceptor('files', 20, {
-      dest: './uploads',
-      limits: { fileSize: 25 * 1024 * 1024 },
+    FilesInterceptor('files', 5, {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
     }),
   )
   upload(
@@ -96,11 +93,4 @@ export class FileController {
   remove(@Param('id') id: string, @Auth() user: User) {
     return this.fileService.remove(id, user);
   }
-}
-
-function contentDisposition(type: 'attachment' | 'inline', filename: string) {
-  const fallback = filename
-    .replace(/[^\x20-\x7E]/g, '_')
-    .replace(/["\\]/g, '_');
-  return `${type}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
